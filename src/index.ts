@@ -5,6 +5,6 @@ import { createServer } from "./server.js";
 createServer()
   .connect(new StdioServerTransport())
   .catch((err) => {
-    console.error("agy-bridge failed to start:", err);
+    console.error("gemini-bridge failed to start:", err);
     process.exit(1);
   });

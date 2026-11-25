@@ -1,11 +1,11 @@
 {
-  "name": "agy-bridge",
+  "name": "gemini-bridge",
   "version": "0.5.1",
-  "description": "MCP bridge and compact MCP App panel for Claude Code to delegate tasks to Antigravity CLI (Gemini Neon) with live token telemetry and quota tracking.",
-  "mcpName": "io.github.sshahzaiib/agy-bridge",
+  "description": "MCP bridge and compact MCP App panel for Claude Code to delegate tasks to Gemini via Antigravity CLI with live token telemetry and quota tracking.",
+  "mcpName": "io.github.d-finite/gemini-bridge",
   "type": "module",
   "bin": {
-    "agy-bridge": "dist/index.js"
+    "gemini-bridge": "dist/index.js"
   },
   "files": [
     "dist",

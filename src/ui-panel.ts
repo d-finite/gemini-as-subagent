@@ -68,7 +68,9 @@ interface DashboardSnapshot {
   activeRunId?: string;
 }
 
-const app = new App({ name: "agy-bridge-panel", version: "1.0.0" });
+const app = new App({ name: "gemini-panel", version: "1.0.0" });
+
+const GEMINI_STAR_SVG = `<svg class="gem-star" viewBox="0 0 28 28" fill="none" aria-hidden="true"><defs><linearGradient id="gemGrad" x1="2" y1="2" x2="26" y2="26" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4285F4"/><stop offset="45%" stop-color="#9B72CB"/><stop offset="80%" stop-color="#D96570"/><stop offset="100%" stop-color="#F4B400"/></linearGradient></defs><path d="M14 1.5C14.6 8.4 19.6 13.4 26.5 14C19.6 14.6 14.6 19.6 14 26.5C13.4 19.6 8.4 14.6 1.5 14C8.4 13.4 13.4 8.4 14 1.5Z" fill="url(#gemGrad)"/></svg>`;
 
 let state: DashboardSnapshot | null = null;
 let expandedId: string | null = null;
@@ -192,7 +194,7 @@ function renderQuota(q: QuotaSnapshot): string {
 
 function renderRuns(runs: RunRecord[]): string {
   if (!runs.length) {
-    return `<div class="empty">暂无 Gemini 子任务记录。Claude 调用 agy-bridge 后会在此实时显示耗时、上下文与输出。</div>`;
+    return `<div class="empty">暂无 Gemini 子任务记录。Claude 调用 gemini MCP 后会在此实时显示耗时、上下文与输出。</div>`;
   }
   const now = Date.now();
   return `<div class="run-list">${runs
@@ -266,8 +268,8 @@ function render(): void {
     <div class="shell">
       <div class="topbar">
         <div class="tb-left">
-          <span class="dot ${active > 0 ? "dot-running" : "dot-done"}"></span>
-          <span class="tb-title">Gemini Subagents</span>
+          <span class="star-wrap ${active > 0 ? "is-active" : ""}">${GEMINI_STAR_SVG}</span>
+          <span class="tb-title">Gemini</span>
           ${active > 0 ? `<span class="active-badge">${active} 运行中</span>` : `<span class="idle-badge">${state?.runs.length ?? 0} 条记录</span>`}
         </div>
         <div class="tb-right">

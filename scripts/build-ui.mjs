@@ -35,6 +35,10 @@ body {
 .shell { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tb-left, .tb-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.star-wrap { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.gem-star { width: 15px; height: 15px; display: block; }
+.star-wrap.is-active .gem-star { animation: gemSpin 2.6s ease-in-out infinite; filter: drop-shadow(0 0 4px rgba(155,114,203,0.55)); }
+@keyframes gemSpin { 0%, 100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.12) rotate(18deg); } }
 .tb-title { font-weight: 600; font-size: 12.5px; letter-spacing: -0.01em; }
 .active-badge { font-size: 10.5px; padding: 1px 6px; border-radius: 999px; background: rgba(16,185,129,0.14); color: var(--ok); font-weight: 600; }
 .idle-badge { font-size: 10.5px; color: var(--fg2); }
@@ -124,7 +128,8 @@ async function main() {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Gemini Subagents</title>
+<title>Gemini</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28' fill='none'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='2' y1='2' x2='26' y2='26' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0%25' stop-color='%234285F4'/%3E%3Cstop offset='45%25' stop-color='%239B72CB'/%3E%3Cstop offset='80%25' stop-color='%23D96570'/%3E%3Cstop offset='100%25' stop-color='%23F4B400'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M14 1.5C14.6 8.4 19.6 13.4 26.5 14C19.6 14.6 14.6 19.6 14 26.5C13.4 19.6 8.4 14.6 1.5 14C8.4 13.4 13.4 8.4 14 1.5Z' fill='url(%23g)'/%3E%3C/svg%3E" />
 <style>${CSS}</style>
 </head>
 <body>

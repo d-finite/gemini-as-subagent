@@ -207,7 +207,7 @@ export function truncate(text: string, max: number): { text: string; truncated: 
   if (text.length <= max) return { text, truncated: false };
   return {
     text:
-      `${text.slice(0, max)}\n\n[agy-bridge: output truncated at ${max} chars; ` +
+      `${text.slice(0, max)}\n\n[gemini: output truncated at ${max} chars; ` +
       `full length was ${text.length} chars. Ask a narrower question or raise AGY_MAX_OUTPUT_CHARS.]`,
     truncated: true,
   };

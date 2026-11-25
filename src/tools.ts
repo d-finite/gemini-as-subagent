@@ -157,7 +157,7 @@ export const TOOLS: ToolDef[] = [
       "Continue a previous Gemini temporary session by session_id (returned by every other tool). " +
       "USE THIS for multi-turn discussion with Gemini on a review or investigation without resending context.",
     schema: {
-      session_id: z.string().describe("The session id returned by a previous agy-bridge call."),
+      session_id: z.string().describe("The session id returned by a previous gemini tool call."),
       question: z.string().describe("The follow-up question or discussion point."),
       ...commonShape,
     },

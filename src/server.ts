@@ -17,8 +17,23 @@ import { CooldownRegistry, QuotaError } from "./quota.js";
 import { RunTracker, formatTokensShort, readSessionTokens, summarizeLabel } from "./telemetry.js";
 import { TOOLS, type ToolDef } from "./tools.js";
 
-export const PANEL_URI = "ui://agy-bridge/panel.html";
+export const PANEL_URI = "ui://gemini/panel.html";
 export const MCP_APP_MIME = "text/html;profile=mcp-app";
+
+const GEMINI_SPARKLE_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" fill="none">' +
+  "<defs>" +
+  '<linearGradient id="g" x1="2" y1="2" x2="26" y2="26" gradientUnits="userSpaceOnUse">' +
+  '<stop offset="0%" stop-color="#4285F4"/>' +
+  '<stop offset="45%" stop-color="#9B72CB"/>' +
+  '<stop offset="80%" stop-color="#D96570"/>' +
+  '<stop offset="100%" stop-color="#F4B400"/>' +
+  "</linearGradient>" +
+  "</defs>" +
+  '<path d="M14 1.5C14.6 8.4 19.6 13.4 26.5 14C19.6 14.6 14.6 19.6 14 26.5C13.4 19.6 8.4 14.6 1.5 14C8.4 13.4 13.4 8.4 14 1.5Z" fill="url(#g)"/>' +
+  "</svg>";
+
+export const GEMINI_ICON_DATA_URI = `data:image/svg+xml;base64,${Buffer.from(GEMINI_SPARKLE_SVG).toString("base64")}`;
 
 const PANEL_META = {
   ui: { resourceUri: PANEL_URI },
@@ -29,7 +44,7 @@ const PANEL_SIDE_META = {
   ui: { resourceUri: PANEL_URI },
   "ui/resourceUri": PANEL_URI,
   "com.google.antigravity/ui": {
-    entrypoints: [{ type: "aux_pane", title: "Gemini Subagents" }],
+    entrypoints: [{ type: "aux_pane", title: "Gemini" }],
   },
 };
 
@@ -168,9 +183,7 @@ export function createToolHandler(
       if (finalSessionId) meta.push(`session: ${finalSessionId} (use follow_up to continue)`);
 
       return {
-        content: [
-          { type: "text", text: `${result.output}\n\n---\n[agy-bridge] ${meta.join(" | ")}` },
-        ],
+        content: [{ type: "text", text: `${result.output}\n\n---\n[gemini] ${meta.join(" | ")}` }],
         structuredContent: {
           activeRunId: runId,
           ...snapshot,
@@ -188,7 +201,7 @@ export function createToolHandler(
       let text = msg;
       if (cfg.onFailure === "strict") {
         text +=
-          "\n\n[agy-bridge strict mode] Delegation failed. Do NOT perform this work yourself " +
+          "\n\n[gemini strict mode] Delegation failed. Do NOT perform this work yourself " +
           "in the main context — report the failure to the user and let them decide how to proceed.";
       }
       return {
@@ -213,13 +226,19 @@ export function createServer(): McpServer {
   const tracker = new RunTracker();
 
   const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
-  const server = new McpServer({ name: "agy-bridge", version });
+  const serverInfo = {
+    name: "gemini",
+    title: "Gemini",
+    version,
+    icons: [{ src: GEMINI_ICON_DATA_URI, mimeType: "image/svg+xml" }],
+  } as ConstructorParameters<typeof McpServer>[0];
+  const server = new McpServer(serverInfo);
 
   server.registerResource(
-    "gemini_subagents_panel",
+    "gemini_panel",
     PANEL_URI,
     {
-      title: "Gemini Subagents & Antigravity Quota",
+      title: "Gemini",
       description:
         "Compact live monitor for Gemini subagent runs, context usage, and Antigravity quota.",
       mimeType: MCP_APP_MIME,

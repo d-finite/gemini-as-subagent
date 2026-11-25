@@ -84,7 +84,7 @@ export const DEFAULT_STATE_PATH = path.join(
   ".gemini",
   "antigravity",
   "plugin_data",
-  "agy-bridge-custom",
+  "gemini-bridge",
   "runs.json",
 );
 
