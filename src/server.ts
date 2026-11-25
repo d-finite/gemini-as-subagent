@@ -230,7 +230,7 @@ export function createServer(): McpServer {
     name: "gemini",
     title: "Gemini",
     version,
-    icons: [{ src: GEMINI_ICON_DATA_URI, mimeType: "image/svg+xml" }],
+    icons: [{ src: GEMINI_ICON_DATA_URI, mimeType: "image/svg+xml", sizes: ["any"] }],
   } as ConstructorParameters<typeof McpServer>[0];
   const server = new McpServer(serverInfo);
 

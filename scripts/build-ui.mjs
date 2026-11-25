@@ -55,8 +55,8 @@ body {
 .dot-cancelled { background: var(--fg2); opacity: 0.6; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.55); } 70% { box-shadow: 0 0 0 5px rgba(16,185,129,0); } 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); } }
 
-.quota-box { background: var(--bg2); border: 1px solid var(--bd); border-radius: 7px; padding: 7px 9px; display: flex; flex-direction: column; gap: 5px; }
-.q-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.quota-box { background: var(--bg2); border: 1px solid var(--bd); border-radius: 7px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.q-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 14px; }
 .q-item { display: flex; flex-direction: column; gap: 3px; }
 .q-head { display: flex; justify-content: space-between; align-items: baseline; }
 .q-label { font-size: 11px; color: var(--fg2); font-weight: 500; }

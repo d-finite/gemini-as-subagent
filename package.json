@@ -1,11 +1,11 @@
 {
-  "name": "gemini-as-claude-subagent",
+  "name": "gemini-as-subagent",
   "version": "0.5.1",
-  "description": "Use Gemini (via Antigravity CLI) as a Claude Code subagent over MCP, with Neon routing, live token telemetry, Antigravity quota tracking, and a compact MCP App panel.",
-  "mcpName": "io.github.d-finite/gemini-as-claude-subagent",
+  "description": "Use Gemini (via Antigravity CLI) as an MCP subagent for Claude Code, Codex, Cursor, and other MCP hosts, with Neon routing, live token telemetry, quota tracking, and a compact MCP App panel.",
+  "mcpName": "io.github.d-finite/gemini-as-subagent",
   "type": "module",
   "bin": {
-    "gemini-as-claude-subagent": "dist/index.js"
+    "gemini-as-subagent": "dist/index.js"
   },
   "files": [
     "dist",
