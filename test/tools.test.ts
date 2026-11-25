@@ -20,15 +20,11 @@ describe("TOOLS", () => {
     }
   });
 
-  it("every tool has a sane per-tool timeout", () => {
+  it("every tool has a generous per-tool timeout", () => {
     for (const t of TOOLS) {
-      expect(t.timeoutSec).toBeGreaterThan(0);
-      expect(t.timeoutSec).toBeLessThanOrEqual(600);
+      expect(t.timeoutSec).toBeGreaterThanOrEqual(600);
+      expect(t.timeoutSec).toBeLessThanOrEqual(1800);
     }
-  });
-
-  it("web_lookup fails fast (well under the old 20-minute default)", () => {
-    expect(TOOLS.find((t) => t.name === "web_lookup")!.timeoutSec).toBeLessThanOrEqual(180);
   });
 });
 

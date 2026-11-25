@@ -24,6 +24,23 @@ const commonShape = {
       'Optional model override from `agy models` (e.g. "gemini-4-neon-medium", ' +
         '"gemini-4-neon-high", "gemini-4-neon-xhigh"). Omit to use the Neon 3-tier default.',
     ),
+  timeout_sec: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Optional timeout in seconds; pass 0 for no time limit (wait until completion). " +
+        "Defaults to generous per-tool limit (or 0 when background=true).",
+    ),
+  background: z
+    .boolean()
+    .optional()
+    .describe(
+      "Run asynchronously in the background with no time limit (default timeout_sec=0) and return " +
+        "a run_id immediately. RECOMMENDED for large research, broad trajectory sweeps, or heavy " +
+        "reviews (>3 min) so the MCP call never times out. Retrieve results with gemini_wait(run_id).",
+    ),
 };
 
 export interface ToolDef {
@@ -65,7 +82,7 @@ export const TOOLS: ToolDef[] = [
       ...commonShape,
     },
     chain: NEON_MEDIUM_CHAIN,
-    timeoutSec: 300,
+    timeoutSec: 900,
     buildPrompt(args, cwd) {
       const files = resolveFiles(args.files as string[], cwd);
       return (
@@ -87,7 +104,7 @@ export const TOOLS: ToolDef[] = [
       ...commonShape,
     },
     chain: NEON_MEDIUM_CHAIN,
-    timeoutSec: 180,
+    timeoutSec: 600,
     buildPrompt(args) {
       return (
         `Search this repository to answer the following. Use git log, git diff, git blame, ` +
@@ -106,7 +123,7 @@ export const TOOLS: ToolDef[] = [
       ...commonShape,
     },
     chain: NEON_MEDIUM_CHAIN,
-    timeoutSec: 120,
+    timeoutSec: 600,
     buildPrompt(args) {
       return `Look up on the web: ${args.query}\n\nInclude source URLs for key claims. ${OUTPUT_RULES}`;
     },
@@ -130,7 +147,7 @@ export const TOOLS: ToolDef[] = [
       ...commonShape,
     },
     chain: NEON_HIGH_CHAIN,
-    timeoutSec: 300,
+    timeoutSec: 900,
     buildPrompt(args, cwd) {
       const files = args.files as string[] | undefined;
       const content = args.content as string | undefined;
@@ -162,7 +179,7 @@ export const TOOLS: ToolDef[] = [
       ...commonShape,
     },
     chain: [],
-    timeoutSec: 300,
+    timeoutSec: 900,
     buildPrompt(args) {
       return args.question as string;
     },
@@ -178,7 +195,7 @@ export const TOOLS: ToolDef[] = [
       ...commonShape,
     },
     chain: NEON_HIGH_CHAIN,
-    timeoutSec: 600,
+    timeoutSec: 1800,
     buildPrompt(args) {
       return args.prompt as string;
     },

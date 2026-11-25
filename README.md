@@ -81,17 +81,18 @@ Point any stdio MCP client to `node /path/to/gemini-as-subagent/dist/index.js` w
 
 ## Tools & Default Neon Routing
 
-| Tool                 | Purpose                                                         | Default Model Chain                                       |
-| :------------------- | :-------------------------------------------------------------- | :-------------------------------------------------------- |
-| `analyze_files`      | Heavy file, log, or trajectory reading (>200 lines or >3 files) | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` |
-| `deep_search`        | Repo-wide grep and `git log`/`diff`/`blame` archaeology         | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` |
-| `web_lookup`         | Current docs, API references, external web lookup               | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` |
-| `adversarial_review` | Plan/proposal/prompt/code review & decision critique            | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` |
-| `delegate`           | General collaborative research, report drafting, or discussion  | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` |
-| `follow_up`          | Continue an existing temporary Gemini session by `session_id`   | Inherits prior session                                    |
-| `gemini_status`      | Open or refresh the compact MCP App status & quota panel        | —                                                         |
+| Tool                 | Purpose                                                         | Default Model Chain                                       | Default Sync Timeout          |
+| :------------------- | :-------------------------------------------------------------- | :-------------------------------------------------------- | :---------------------------- |
+| `analyze_files`      | Heavy file, log, or trajectory reading (>200 lines or >3 files) | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` | 15m (`900s`)                  |
+| `deep_search`        | Repo-wide grep and `git log`/`diff`/`blame` archaeology         | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` | 10m (`600s`)                  |
+| `web_lookup`         | Current docs, API references, external web lookup               | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` | 10m (`600s`)                  |
+| `adversarial_review` | Plan/proposal/prompt/code review & decision critique            | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` | 15m (`900s`)                  |
+| `delegate`           | General collaborative research, report drafting, or discussion  | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` | 30m (`1800s`)                 |
+| `follow_up`          | Continue an existing temporary Gemini session by `session_id`   | Inherits prior session                                    | 15m (`900s`)                  |
+| `gemini_wait`        | Wait for a `background: true` task and collect its full report  | —                                                         | up to `wait_sec` (def `120s`) |
+| `gemini_status`      | Open or refresh the compact MCP App status & quota panel        | —                                                         | —                             |
 
-Every tool accepts an optional `model` override (any ID or display name from `agy models`, e.g. `gemini-4-neon-xhigh`) and `cwd`.
+Every delegation tool accepts optional `model`, `cwd`, `timeout_sec` (`0` = no time limit), and `background: true` (runs asynchronously with no time limit by default and returns `run_id` immediately — ideal for large research tasks that would otherwise hit synchronous MCP timeouts).
 
 Every delegation response includes a compact telemetry footer:
 

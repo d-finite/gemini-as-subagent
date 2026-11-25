@@ -300,6 +300,8 @@ export function formatTokensShort(n: number): string {
 export class RunTracker {
   private runs: RunRecord[] = [];
   private fullOutputs = new Map<string, string>();
+  private controllers = new Map<string, AbortController>();
+  private waiters = new Map<string, Set<() => void>>();
   private loaded = false;
 
   constructor(
@@ -416,8 +418,68 @@ export class RunTracker {
     if (update.error !== undefined) rec.error = update.error;
     if (update.failover?.length) rec.failover = update.failover;
     if (update.tokens) rec.tokens = update.tokens;
+    this.controllers.delete(id);
+    const pending = this.waiters.get(id);
+    if (pending) {
+      this.waiters.delete(id);
+      for (const resolve of pending) resolve();
+    }
     void this.save();
     return rec;
+  }
+
+  registerController(id: string, controller: AbortController): void {
+    this.controllers.set(id, controller);
+  }
+
+  cancelRun(id: string): boolean {
+    const controller = this.controllers.get(id);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }
+
+  async waitForRun(
+    id: string,
+    waitMs: number,
+    signal?: AbortSignal,
+  ): Promise<RunRecord | undefined> {
+    await this.ensureLoaded();
+    const existing = this.runs.find((r) => r.id === id);
+    if (!existing || existing.status !== "running" || waitMs <= 0) {
+      return existing;
+    }
+
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", finish);
+        const set = this.waiters.get(id);
+        if (set) {
+          set.delete(finish);
+          if (set.size === 0) this.waiters.delete(id);
+        }
+        resolve();
+      };
+
+      const set = this.waiters.get(id) ?? new Set<() => void>();
+      set.add(finish);
+      this.waiters.set(id, set);
+
+      const timer = setTimeout(finish, waitMs);
+      timer.unref?.();
+
+      if (signal?.aborted) {
+        finish();
+      } else {
+        signal?.addEventListener("abort", finish, { once: true });
+      }
+    });
+
+    return this.runs.find((r) => r.id === id);
   }
 
   getFullOutput(id: string): { run?: RunRecord; output?: string } {

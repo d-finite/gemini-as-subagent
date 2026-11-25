@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { createToolHandler } from "../src/server.js";
+import { createToolHandler, createWaitHandler } from "../src/server.js";
 import { ModelRegistry } from "../src/models.js";
 import { TOOLS } from "../src/tools.js";
 import { CooldownRegistry } from "../src/quota.js";
+import { RunTracker } from "../src/telemetry.js";
 import type { Config } from "../src/config.js";
 import type { ChildHandle, RunnerDeps } from "../src/runner.js";
 
@@ -226,5 +227,68 @@ describe("createToolHandler", () => {
     const res = await handlerFor("delegate", f)({ prompt: "x" }, { signal: ac.signal });
     expect(res.isError).toBe(true);
     expect((res.content[0] as { text: string }).text).toMatch(/cancelled/i);
+  });
+
+  it("supports per-call timeout_sec=0 (no time limit)", async () => {
+    const f = fakeDeps();
+    await handlerFor("web_lookup", f)({ query: "big research", timeout_sec: 0 });
+    const args = f.runs[0].args;
+    expect(args[args.indexOf("--print-timeout") + 1]).toBe("0s");
+  });
+
+  it("runs in background mode with unlimited timeout and collects output via gemini_wait", async () => {
+    let finishChild!: () => void;
+    const runs: Run[] = [];
+    const deps: RunnerDeps = {
+      spawnChild: (_file, args) => {
+        runs.push({ args });
+        return {
+          stdout: () => "deep research report",
+          stderr: () => "",
+          wait: () =>
+            new Promise((resolve) => {
+              finishChild = () => resolve({ code: 0 });
+            }),
+          kill: () => {},
+        };
+      },
+      readLog: async () => "",
+      removeLog: async () => {},
+      readSessionsFile: async () => JSON.stringify({ [process.cwd()]: "sess-bg" }),
+      makeLogPath: () => "/tmp/agy-bridge-bg.log",
+      pollMs: 5,
+      graceMs: 20,
+      killGraceMs: 5,
+    };
+    const cooldowns = new CooldownRegistry();
+    const tracker = new RunTracker(undefined, "/nonexistent/quota.json", false);
+    const delegateHandler = createToolHandler(
+      TOOLS.find((t) => t.name === "delegate")!,
+      cfg,
+      new ModelRegistry(async () => LISTING),
+      deps,
+      cooldowns,
+      tracker,
+    );
+    const waitHandler = createWaitHandler(cfg, cooldowns, tracker);
+
+    const startRes = await delegateHandler({ prompt: "huge survey", background: true });
+    expect(startRes.isError).toBeUndefined();
+    const runId = (startRes.structuredContent as { activeRunId: string }).activeRunId;
+    expect(runs[0].args[runs[0].args.indexOf("--print-timeout") + 1]).toBe("0s");
+
+    // Instant check while still running returns running status cleanly
+    const midRes = await waitHandler({ run_id: runId, wait_sec: 0 });
+    expect(midRes.isError).toBeUndefined();
+    expect((midRes.content[0] as { text: string }).text).toMatch(/still running/i);
+
+    // Finish background job and collect complete output
+    const waitPromise = waitHandler({ run_id: runId, wait_sec: 5 });
+    finishChild();
+    const doneRes = await waitPromise;
+    expect(doneRes.isError).toBeUndefined();
+    const doneText = (doneRes.content[0] as { text: string }).text;
+    expect(doneText).toContain("deep research report");
+    expect(doneText).toContain("sess-bg");
   });
 });

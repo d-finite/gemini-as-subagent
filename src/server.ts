@@ -14,7 +14,14 @@ import {
   type RunResult,
 } from "./runner.js";
 import { CooldownRegistry, QuotaError } from "./quota.js";
-import { RunTracker, formatTokensShort, readSessionTokens, summarizeLabel } from "./telemetry.js";
+import {
+  RunTracker,
+  formatTokensShort,
+  readSessionTokens,
+  summarizeLabel,
+  type DashboardSnapshot,
+  type RunRecord,
+} from "./telemetry.js";
 import { TOOLS, type ToolDef } from "./tools.js";
 
 export const PANEL_URI = "ui://gemini/panel.html";
@@ -74,6 +81,46 @@ async function loadPanelHtml(): Promise<string> {
   }
 }
 
+function formatFooter(
+  run: RunRecord | undefined,
+  snapshot: DashboardSnapshot,
+  note?: string,
+): string {
+  const meta: string[] = [`model: ${run?.model ?? "agy default"}`];
+  if (run) meta.push(`time: ${(run.elapsedMs / 1000).toFixed(1)}s`);
+  if (run?.tokens) {
+    meta.push(
+      `ctx: ${formatTokensShort(run.tokens.contextTokens)} (cache ${Math.round(run.tokens.cacheHitPct)}%)`,
+    );
+    meta.push(`out: ${formatTokensShort(run.tokens.totalOutputTokens)}`);
+  }
+  const q5 = snapshot.quota.buckets.find((b) => b.window === "5h");
+  const qw = snapshot.quota.buckets.find((b) => b.window === "weekly");
+  if (q5 || qw) {
+    const qParts: string[] = [];
+    if (q5) qParts.push(`5h ${q5.remainingPct.toFixed(0)}%`);
+    if (qw) qParts.push(`wk ${qw.remainingPct.toFixed(0)}%`);
+    meta.push(`agy: ${qParts.join("/")}`);
+  }
+  if (note) meta.push(`note: ${note}`);
+  if (run?.failover?.length) meta.push(`failover: ${run.failover.join("; ")}`);
+  if (run?.sessionId) meta.push(`session: ${run.sessionId} (use follow_up to continue)`);
+  return `[gemini] ${meta.join(" | ")}`;
+}
+
+function formatError(msg: string, cfg: Config): ToolResponse {
+  let text = msg;
+  if (cfg.onFailure === "strict") {
+    text +=
+      "\n\n[gemini strict mode] Delegation failed. Do NOT perform this work yourself " +
+      "in the main context — report the failure to the user and let them decide how to proceed.";
+  }
+  return {
+    content: [{ type: "text", text }],
+    isError: true,
+  };
+}
+
 export function createToolHandler(
   tool: ToolDef,
   cfg: Config,
@@ -87,9 +134,22 @@ export function createToolHandler(
     try {
       const cwd = (args.cwd as string | undefined) ?? process.cwd();
       const conversationId = args.session_id as string | undefined;
+      const background = args.background === true;
       const prompt = tool.buildPrompt(args, cwd);
+
+      const explicitTimeout =
+        typeof args.timeout_sec === "number" &&
+        Number.isInteger(args.timeout_sec) &&
+        args.timeout_sec >= 0
+          ? args.timeout_sec
+          : undefined;
       const timeoutSec =
-        cfg.perToolTimeouts[tool.name] ?? (cfg.timeoutExplicit ? cfg.timeoutSec : tool.timeoutSec);
+        explicitTimeout !== undefined
+          ? explicitTimeout
+          : background
+            ? 0
+            : (cfg.perToolTimeouts[tool.name] ??
+              (cfg.timeoutExplicit ? cfg.timeoutSec : tool.timeoutSec));
 
       const resolution = conversationId
         ? { models: [undefined], note: undefined }
@@ -109,83 +169,106 @@ export function createToolHandler(
       });
       runId = rec.id;
 
-      const attempts: string[] = [];
-      let result: RunResult | undefined;
-      let used: string | undefined;
+      const execute = async (
+        signal?: AbortSignal,
+      ): Promise<{ output: string; run?: RunRecord }> => {
+        const attempts: string[] = [];
+        let result: RunResult | undefined;
+        let used: string | undefined;
 
-      for (const model of resolution.models) {
-        if (model && cooldowns.cooling(model)) {
-          attempts.push(`${model}: quota cooldown, ${cooldowns.describe(model)} left`);
-          continue;
-        }
-        if (model) tracker.updateRunModel(runId, model);
-        try {
-          result = await runAgy(
-            { prompt, cwd, model, conversationId, timeoutSec, signal: extra?.signal },
-            cfg,
-            deps,
-          );
-          used = model;
-          break;
-        } catch (err) {
-          if (err instanceof QuotaError && model) {
-            cooldowns.set(model, err.resetSeconds);
-            attempts.push(
-              `${model}: quota exhausted${err.resetText ? ` (resets in ${err.resetText})` : ""}`,
-            );
+        for (const model of resolution.models) {
+          if (model && cooldowns.cooling(model)) {
+            attempts.push(`${model}: quota cooldown, ${cooldowns.describe(model)} left`);
             continue;
           }
-          throw err;
+          if (model) tracker.updateRunModel(rec.id, model);
+          try {
+            result = await runAgy(
+              { prompt, cwd, model, conversationId, timeoutSec, signal },
+              cfg,
+              deps,
+            );
+            used = model;
+            break;
+          } catch (err) {
+            if (err instanceof QuotaError && model) {
+              cooldowns.set(model, err.resetSeconds);
+              attempts.push(
+                `${model}: quota exhausted${err.resetText ? ` (resets in ${err.resetText})` : ""}`,
+              );
+              continue;
+            }
+            throw err;
+          }
         }
+
+        if (!result) {
+          throw new Error(
+            `All candidate models are quota-exhausted or cooling down:\n` +
+              `${attempts.map((a) => `- ${a}`).join("\n")}\n` +
+              `Retry after the quota resets, or pass an explicit \`model\`.`,
+          );
+        }
+
+        const finalSessionId = result.sessionId ?? conversationId;
+        const tokens = finalSessionId ? await readSessionTokens(finalSessionId) : undefined;
+        const finished = await tracker.finishRun(rec.id, {
+          status: "done",
+          model: used ?? tokens?.model ?? "agy default",
+          sessionId: finalSessionId,
+          output: result.output,
+          truncated: result.truncated,
+          failover: attempts,
+          tokens,
+        });
+        return { output: result.output, run: finished };
+      };
+
+      if (background) {
+        const bgController = new AbortController();
+        tracker.registerController(rec.id, bgController);
+        void execute(bgController.signal).catch(async (err) => {
+          const msg = (err as Error).message;
+          const cancelled = /cancelled/i.test(msg);
+          await tracker.finishRun(rec.id, {
+            status: cancelled ? "cancelled" : "error",
+            error: msg,
+          });
+        });
+
+        const snapshot = await tracker.getSnapshot(cooldowns);
+        const limitLabel = timeoutSec === 0 ? "no time limit" : `timeout ${timeoutSec}s`;
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Started Gemini background task.\n` +
+                `- run_id: ${rec.id}\n` +
+                `- model: ${initialModel} (${limitLabel})\n` +
+                `- tool: ${tool.name}\n` +
+                `Call \`gemini_wait({ run_id: "${rec.id}" })\` to collect the completed report without hitting MCP tool timeouts.`,
+            },
+          ],
+          structuredContent: {
+            activeRunId: rec.id,
+            ...snapshot,
+          },
+        };
       }
 
-      if (!result) {
-        throw new Error(
-          `All candidate models are quota-exhausted or cooling down:\n` +
-            `${attempts.map((a) => `- ${a}`).join("\n")}\n` +
-            `Retry after the quota resets, or pass an explicit \`model\`.`,
-        );
-      }
-
-      const finalSessionId = result.sessionId ?? conversationId;
-      const tokens = finalSessionId ? await readSessionTokens(finalSessionId) : undefined;
-      const finished = await tracker.finishRun(runId, {
-        status: "done",
-        model: used ?? tokens?.model ?? "agy default",
-        sessionId: finalSessionId,
-        output: result.output,
-        truncated: result.truncated,
-        failover: attempts,
-        tokens,
-      });
-
+      const { output, run: finished } = await execute(extra?.signal);
       const snapshot = await tracker.getSnapshot(cooldowns);
 
-      const elapsedSec = finished ? `${(finished.elapsedMs / 1000).toFixed(1)}s` : undefined;
-      const meta: string[] = [`model: ${used ?? tokens?.model ?? "agy default"}`];
-      if (elapsedSec) meta.push(`time: ${elapsedSec}`);
-      if (tokens) {
-        meta.push(
-          `ctx: ${formatTokensShort(tokens.contextTokens)} (cache ${Math.round(tokens.cacheHitPct)}%)`,
-        );
-        meta.push(`out: ${formatTokensShort(tokens.totalOutputTokens)}`);
-      }
-      const q5 = snapshot.quota.buckets.find((b) => b.window === "5h");
-      const qw = snapshot.quota.buckets.find((b) => b.window === "weekly");
-      if (q5 || qw) {
-        const qParts: string[] = [];
-        if (q5) qParts.push(`5h ${q5.remainingPct.toFixed(0)}%`);
-        if (qw) qParts.push(`wk ${qw.remainingPct.toFixed(0)}%`);
-        meta.push(`agy: ${qParts.join("/")}`);
-      }
-      if (resolution.note) meta.push(`note: ${resolution.note}`);
-      if (attempts.length) meta.push(`failover: ${attempts.join("; ")}`);
-      if (finalSessionId) meta.push(`session: ${finalSessionId} (use follow_up to continue)`);
-
       return {
-        content: [{ type: "text", text: `${result.output}\n\n---\n[gemini] ${meta.join(" | ")}` }],
+        content: [
+          {
+            type: "text",
+            text: `${output}\n\n---\n${formatFooter(finished, snapshot, resolution.note)}`,
+          },
+        ],
         structuredContent: {
-          activeRunId: runId,
+          activeRunId: rec.id,
           ...snapshot,
         },
       };
@@ -198,17 +281,70 @@ export function createToolHandler(
           error: msg,
         });
       }
-      let text = msg;
-      if (cfg.onFailure === "strict") {
-        text +=
-          "\n\n[gemini strict mode] Delegation failed. Do NOT perform this work yourself " +
-          "in the main context — report the failure to the user and let them decide how to proceed.";
-      }
+      return formatError(msg, cfg);
+    }
+  };
+}
+
+export function createWaitHandler(
+  cfg: Config,
+  cooldowns: CooldownRegistry,
+  tracker: RunTracker,
+): (args: Record<string, unknown>, extra?: HandlerExtra) => Promise<ToolResponse> {
+  return async (args, extra) => {
+    const runId = String(args.run_id ?? "");
+    const rawWait = args.wait_sec;
+    const waitSec =
+      typeof rawWait === "number" && Number.isInteger(rawWait) && rawWait >= 0
+        ? Math.min(rawWait, 600)
+        : 120;
+
+    const run = await tracker.waitForRun(runId, waitSec * 1000, extra?.signal);
+    const snapshot = await tracker.getSnapshot(cooldowns);
+
+    if (!run) {
       return {
-        content: [{ type: "text", text }],
+        content: [{ type: "text", text: `No Gemini run found for run_id "${runId}".` }],
+        structuredContent: { ...snapshot },
         isError: true,
       };
     }
+
+    if (run.status === "running") {
+      const elapsedSec = (Math.max(0, Date.now() - run.startedAt) / 1000).toFixed(1);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Gemini task ${run.id} (${run.model}, ${run.tool}) is still running (${elapsedSec}s elapsed).\n` +
+              `Call \`gemini_wait({ run_id: "${run.id}" })\` again to keep waiting, or check \`gemini_status\`.`,
+          },
+        ],
+        structuredContent: {
+          activeRunId: run.id,
+          ...snapshot,
+        },
+      };
+    }
+
+    if (run.status === "done") {
+      const { output } = tracker.getFullOutput(run.id);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${output ?? ""}\n\n---\n${formatFooter(run, snapshot)}`,
+          },
+        ],
+        structuredContent: {
+          activeRunId: run.id,
+          ...snapshot,
+        },
+      };
+    }
+
+    return formatError(run.error ?? `Gemini run ${run.id} ended with status ${run.status}.`, cfg);
   };
 }
 
@@ -269,6 +405,30 @@ export function createServer(): McpServer {
   }
 
   server.registerTool(
+    "gemini_wait",
+    {
+      title: "Wait for Gemini Background Run",
+      description:
+        "Wait for a background Gemini task (started with background=true) to finish and return its full report. " +
+        "Waits up to wait_sec (default 120s) without hitting MCP timeouts; if still running, call again.",
+      inputSchema: {
+        run_id: z.string().describe("The run_id returned when starting the background task."),
+        wait_sec: z
+          .number()
+          .int()
+          .min(0)
+          .max(600)
+          .optional()
+          .describe(
+            "Max seconds to wait before returning current status (default 120, 0 = instant check).",
+          ),
+      },
+      _meta: PANEL_META,
+    },
+    createWaitHandler(cfg, cooldowns, tracker),
+  );
+
+  server.registerTool(
     "gemini_status",
     {
       title: "Gemini Subagents & Quota Panel",
@@ -287,7 +447,7 @@ export function createServer(): McpServer {
       );
       const rLines = snapshot.runs.slice(0, 6).map((r) => {
         const tok = r.tokens ? ` | ctx ${formatTokensShort(r.tokens.contextTokens)}` : "";
-        return `- [${r.status}] ${r.model} (${r.tool}) ${(r.elapsedMs / 1000).toFixed(1)}s${tok}: ${r.label}`;
+        return `- [${r.status}] (${r.id}) ${r.model} (${r.tool}) ${(r.elapsedMs / 1000).toFixed(1)}s${tok}: ${r.label}`;
       });
       const summary = [
         `Gemini Subagents: ${snapshot.activeCount} running / ${snapshot.runs.length} recent`,
@@ -304,7 +464,7 @@ export function createServer(): McpServer {
   server.registerTool(
     "_agy_panel_state",
     {
-      description: "Internal app-only state polling endpoint for the Gemini Subagents UI panel.",
+      description: "Internal app-only state polling endpoint for the Gemini UI panel.",
       inputSchema: {},
       _meta: APP_ONLY_META,
     },
@@ -330,6 +490,24 @@ export function createServer(): McpServer {
       return {
         content: [{ type: "text", text: output ?? "" }],
         structuredContent: { run_id: id, output: output ?? "" },
+      };
+    },
+  );
+
+  server.registerTool(
+    "_agy_cancel_run",
+    {
+      description: "Internal app-only endpoint to cancel a running background Gemini task.",
+      inputSchema: { run_id: z.string() },
+      _meta: APP_ONLY_META,
+    },
+    async (args) => {
+      const id = String(args.run_id ?? "");
+      const cancelled = tracker.cancelRun(id);
+      const snapshot = await tracker.getSnapshot(cooldowns);
+      return {
+        content: [{ type: "text", text: cancelled ? "cancelled" : "not running" }],
+        structuredContent: { cancelled, ...snapshot },
       };
     },
   );

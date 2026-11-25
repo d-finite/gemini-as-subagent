@@ -233,12 +233,19 @@ describe("runAgy", () => {
     expect(err.resetSeconds).toBe(4 * 3600 + 24 * 60);
   });
 
-  it("times out and rejects even if the child never exits (held pipes)", async () => {
+  it("times out and rejects even if the child never exits (held pipes), including session hint", async () => {
     const f = fakeDeps({ neverExit: true });
     await expect(
       runAgy({ prompt: "q", cwd: "/repo", timeoutSec: 0.05 }, cfg, f.deps),
-    ).rejects.toThrow(/timed out after/);
+    ).rejects.toThrow(/timed out after.*sess-42/s);
     expect(f.kills).toContain("SIGTERM");
+  });
+
+  it("supports timeoutSec=0 (no time limit) and passes --print-timeout 0s", async () => {
+    const f = fakeDeps({ stdout: "done" });
+    const r = await runAgy({ prompt: "q", cwd: "/repo", timeoutSec: 0 }, cfg, f.deps);
+    expect(r.output).toBe("done");
+    expect(f.args()![f.args()!.indexOf("--print-timeout") + 1]).toBe("0s");
   });
 
   it("escalates to SIGKILL when the child survives SIGTERM", async () => {

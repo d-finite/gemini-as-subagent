@@ -191,7 +191,7 @@ export const defaultDeps: RunnerDeps = {
 };
 
 export function buildArgs(req: RunRequest, cfg: Config, logPath: string): string[] {
-  const timeoutSec = req.timeoutSec ?? cfg.timeoutSec;
+  const timeoutSec = req.timeoutSec !== undefined ? req.timeoutSec : cfg.timeoutSec;
   const args: string[] = [];
   if (cfg.skipPermissions) args.push("--dangerously-skip-permissions");
   if (cfg.sandbox) args.push("--sandbox");
@@ -263,19 +263,36 @@ export async function runAgy(
       }
     }, pollMs);
 
-    // Hard deadline independent of the child's pipes: agy's own --print-timeout
-    // should fire first; if it doesn't, reject without waiting for "close".
-    timers.push(
-      setTimeout(
-        () => {
-          killChild();
-          finish(() =>
-            reject(new Error(`agy timed out after ${timeoutSec}s (AGY_TIMEOUT to adjust).`)),
-          );
-        },
-        timeoutSec * 1000 + graceMs,
-      ),
-    );
+    // Hard deadline independent of the child's pipes when timeoutSec > 0.
+    // timeoutSec === 0 means unlimited (wait until the turn finishes or is aborted).
+    if (timeoutSec > 0) {
+      timers.push(
+        setTimeout(
+          () => {
+            killChild();
+            void (async () => {
+              let sidNote = "";
+              try {
+                const map = JSON.parse(await deps.readSessionsFile()) as Record<string, string>;
+                const sid = map[path.resolve(req.cwd)];
+                if (sid) sidNote = ` Partial session may exist: ${sid} (try follow_up).`;
+              } catch {
+                // ignore
+              }
+              finish(() =>
+                reject(
+                  new Error(
+                    `agy timed out after ${timeoutSec}s. For large research tasks, pass ` +
+                      `\`background: true\` (no time limit) or \`timeout_sec: 0\`.${sidNote}`,
+                  ),
+                ),
+              );
+            })();
+          },
+          timeoutSec * 1000 + graceMs,
+        ),
+      );
+    }
 
     const onAbort = () => {
       killChild();

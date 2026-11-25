@@ -48,6 +48,12 @@ body {
   font-family: inherit; line-height: 1.4;
 }
 .btn:hover { border-color: var(--fg2); }
+.btn-stop {
+  background: rgba(239,68,68,0.12); color: var(--low); border: 1px solid rgba(239,68,68,0.28);
+  border-radius: 4px; padding: 0.5px 5px; font-size: 10px; cursor: pointer; flex-shrink: 0;
+  font-family: inherit;
+}
+.btn-stop:hover { background: rgba(239,68,68,0.2); }
 .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 .dot-running { background: var(--ok); box-shadow: 0 0 0 0 rgba(16,185,129,0.55); animation: pulse 1.4s infinite; }
 .dot-done { background: #10b981; opacity: 0.75; }

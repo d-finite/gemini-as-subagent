@@ -47,7 +47,14 @@ describe("loadConfig", () => {
     expect(c.perToolTimeouts).toEqual({ deep_search: 300, delegate: 900 });
   });
 
-  it("ignores non-positive per-tool timeout values", () => {
+  it("supports 0 as unlimited timeout for AGY_TIMEOUT and per-tool env vars", () => {
+    const c = loadConfig({ AGY_TIMEOUT: "0", AGY_TIMEOUT_WEB_LOOKUP: "0" });
+    expect(c.timeoutSec).toBe(0);
+    expect(c.timeoutExplicit).toBe(true);
+    expect(c.perToolTimeouts).toEqual({ web_lookup: 0 });
+  });
+
+  it("ignores negative or non-numeric per-tool timeout values", () => {
     const c = loadConfig({ AGY_TIMEOUT_DEEP_SEARCH: "abc", AGY_TIMEOUT_DELEGATE: "-5" });
     expect(c.perToolTimeouts).toEqual({});
   });

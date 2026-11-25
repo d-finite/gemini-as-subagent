@@ -237,6 +237,11 @@ function renderRuns(runs: RunRecord[]): string {
         `;
       }
 
+      const cancelBtn =
+        r.status === "running"
+          ? `<button class="btn-stop" data-cancel="${esc(r.id)}" title="取消任务">停止</button>`
+          : "";
+
       return `
         <div class="run-card status-${r.status}${isOpen ? " is-open" : ""}" data-toggle="${esc(r.id)}">
           <div class="run-top">
@@ -244,6 +249,7 @@ function renderRuns(runs: RunRecord[]): string {
             <span class="pill tier-${r.tier}">${esc(shortModel(r.model))}</span>
             <span class="tool-tag">${esc(shortTool(r.tool))}</span>
             <span class="run-label" title="${esc(r.label)}">${esc(r.label)}</span>
+            ${cancelBtn}
           </div>
           <div class="run-meta">${metaRight}</div>
           ${detailHtml}
@@ -298,9 +304,22 @@ function render(): void {
     }
   });
 
+  root.querySelectorAll<HTMLElement>("[data-cancel]").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const id = btn.dataset.cancel!;
+      try {
+        await app.callServerTool({ name: "_agy_cancel_run", arguments: { run_id: id } });
+      } catch {
+        // ignore
+      }
+      void refreshState();
+    });
+  });
+
   root.querySelectorAll<HTMLElement>("[data-toggle]").forEach((el) => {
     el.addEventListener("click", (ev) => {
-      if ((ev.target as HTMLElement).closest(".detail-out")) return;
+      if ((ev.target as HTMLElement).closest(".detail-out, [data-cancel]")) return;
       const id = el.dataset.toggle!;
       expandedId = expandedId === id ? null : id;
       render();

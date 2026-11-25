@@ -81,17 +81,18 @@ claude mcp list
 
 ## 工具列表与 Neon 三档路由
 
-| 工具                 | 适用场景                                          | 默认路由链                                                |
-| :------------------- | :------------------------------------------------ | :-------------------------------------------------------- |
-| `analyze_files`      | 大文件、日志、批量轨迹阅读（>200 行或 >3 个文件） | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` |
-| `deep_search`        | 全仓检索与 `git log`/`diff`/`blame` 历史考古      | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` |
-| `web_lookup`         | 查阅最新官方文档、API 参考与外部资料              | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` |
-| `adversarial_review` | Proposal / Prompt / 代码对抗审校与决策挑刺        | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` |
-| `delegate`           | 通用合作调研、精细报告撰写或方案讨论              | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` |
-| `follow_up`          | 传入 `session_id` 续聊上一次 Gemini 临时会话      | 继承原会话                                                |
-| `gemini_status`      | 唤出或刷新紧凑型 MCP App 状态与额度面板           | —                                                         |
+| 工具                 | 适用场景                                           | 默认路由链                                                | 同步默认超时                     |
+| :------------------- | :------------------------------------------------- | :-------------------------------------------------------- | :------------------------------- |
+| `analyze_files`      | 大文件、日志、批量轨迹阅读（>200 行或 >3 个文件）  | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` | 15 分钟（`900s`）                |
+| `deep_search`        | 全仓检索与 `git log`/`diff`/`blame` 历史考古       | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` | 10 分钟（`600s`）                |
+| `web_lookup`         | 查阅最新官方文档、API 参考与外部资料               | `Gemini * Neon (Medium)` → `Neon (High)` → `Flash (High)` | 10 分钟（`600s`）                |
+| `adversarial_review` | Proposal / Prompt / 代码对抗审校与决策挑刺         | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` | 15 分钟（`900s`）                |
+| `delegate`           | 通用合作调研、精细报告撰写或方案讨论               | `Gemini * Neon (High)` → `Neon (XHigh)` → `Neon (Medium)` | 30 分钟（`1800s`）               |
+| `follow_up`          | 传入 `session_id` 续聊上一次 Gemini 临时会话       | 继承原会话                                                | 15 分钟（`900s`）                |
+| `gemini_wait`        | 等待 `background: true` 后台任务完成并收回完整报告 | —                                                         | 最多等 `wait_sec`（默认 `120s`） |
+| `gemini_status`      | 唤出或刷新紧凑型 MCP App 状态与额度面板            | —                                                         | —                                |
 
-所有调用均支持通过可选参数 `model` 显式覆盖模型（传入 `agy models` 中的 ID 或显示名，如 `gemini-4-neon-xhigh`）以及 `cwd`。
+所有委托工具均支持可选参数 `model`、`cwd`、`timeout_sec`（传 `0` 表示无时间上限，直到完成）以及 `background: true`（后台异步运行、默认无时间上限、秒返 `run_id`，彻底避免长调研撞上同步 MCP 超时墙）。
 
 每次调用返回末尾都会附带一行紧凑状态脚注：
 
