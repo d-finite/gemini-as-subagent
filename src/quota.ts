@@ -77,4 +77,16 @@ export class CooldownRegistry {
     const t = this.until.get(model);
     return formatDuration(t === undefined ? 0 : (t - this.now()) / 1000);
   }
+
+  listActive(): { model: string; remainingSec: number; remainingText: string }[] {
+    const now = this.now();
+    const out: { model: string; remainingSec: number; remainingText: string }[] = [];
+    for (const [model, until] of this.until.entries()) {
+      if (until > now) {
+        const remainingSec = Math.ceil((until - now) / 1000);
+        out.push({ model, remainingSec, remainingText: formatDuration(remainingSec) });
+      }
+    }
+    return out;
+  }
 }

@@ -2,8 +2,9 @@ import path from "node:path";
 import { z } from "zod";
 
 const OUTPUT_RULES =
-  "Answer directly with no preamble or closing remarks. Be thorough but concise. " +
-  "Cite file:line for every code-level finding.";
+  "Answer directly in clear, natural human language with no preamble or filler. " +
+  "Be thorough and preserve key details, concrete evidence, and exact file:line citations — " +
+  "do NOT over-compress or drop important nuances.";
 
 export function resolveFiles(files: string[], cwd: string): string[] {
   return files.map((f) => (path.isAbsolute(f) ? f : path.resolve(cwd, f)));
@@ -20,8 +21,8 @@ const commonShape = {
     .string()
     .optional()
     .describe(
-      'Override the model: a name or id from `agy models`, or a `*` version pattern such as "Gemini * Pro (High)". ' +
-        "Normally omit — the tool routes automatically.",
+      'Optional model override from `agy models` (e.g. "gemini-4-neon-medium", ' +
+        '"gemini-4-neon-high", "gemini-4-neon-xhigh"). Omit to use the Neon 3-tier default.',
     ),
 };
 
@@ -35,17 +36,26 @@ export interface ToolDef {
   buildPrompt(args: Record<string, unknown>, cwd: string): string;
 }
 
-// Gemini first, always; other families only when no Gemini model is listed at all.
-const NON_GEMINI_FALLBACK = ["Claude Opus * (Thinking)", "GPT-OSS 120B (Medium)"];
+// Neon-only preference chains (no Hydrogen; Flash only if every Neon tier is unavailable/exhausted).
+const NEON_MEDIUM_CHAIN = [
+  "Gemini * Neon (Medium)",
+  "Gemini * Neon (High)",
+  "Gemini * Flash (High)",
+];
+const NEON_HIGH_CHAIN = [
+  "Gemini * Neon (High)",
+  "Gemini * Neon (XHigh)",
+  "Gemini * Neon (Medium)",
+  "Gemini * Flash (High)",
+];
 
 export const TOOLS: ToolDef[] = [
   {
     name: "analyze_files",
     description:
-      "Delegate file analysis to the Antigravity CLI (Gemini) instead of reading files yourself. " +
-      "USE THIS whenever a file is large (>200 lines) or the task spans more than 3 files: " +
-      "logs, database dumps, generated code, cross-file reviews, comparisons. " +
-      "The files never enter your context — only the answer does.",
+      "Delegate heavy file/log/trajectory reading to Gemini (default: Gemini 4 Neon Medium). " +
+      "USE THIS for long documents, multiple trajectory files, large logs (>200 lines or >3 files) " +
+      "so raw bulk never pollutes Claude's main context — Gemini returns a detailed, plain-language intelligence report.",
     schema: {
       files: z
         .array(z.string())
@@ -54,7 +64,7 @@ export const TOOLS: ToolDef[] = [
       question: z.string().describe("What you want to know about these files."),
       ...commonShape,
     },
-    chain: ["Gemini * Flash (High)", "Gemini * Pro (Low)", ...NON_GEMINI_FALLBACK],
+    chain: NEON_MEDIUM_CHAIN,
     timeoutSec: 300,
     buildPrompt(args, cwd) {
       const files = resolveFiles(args.files as string[], cwd);
@@ -67,16 +77,16 @@ export const TOOLS: ToolDef[] = [
   {
     name: "deep_search",
     description:
-      "Delegate codebase archaeology to the Antigravity CLI: git log/diff/blame spelunking, " +
-      "wide greps across a repo, 'when/why did X change', 'where is Y used'. " +
-      "USE THIS instead of running many search commands yourself — it saves your context.",
+      "Delegate repository archaeology and broad search to Gemini (default: Gemini 4 Neon Medium): " +
+      "git log/diff/blame spelunking, wide repo greps, 'when/why did X change'. " +
+      "Skip for trivial local grep; use when broad scanning would bloat Claude's context.",
     schema: {
       query: z
         .string()
         .describe("What to find, e.g. 'when was the auth middleware refactored and why'."),
       ...commonShape,
     },
-    chain: ["Gemini * Flash (Medium)", "Gemini * Flash (High)", ...NON_GEMINI_FALLBACK],
+    chain: NEON_MEDIUM_CHAIN,
     timeoutSec: 180,
     buildPrompt(args) {
       return (
@@ -89,14 +99,13 @@ export const TOOLS: ToolDef[] = [
   {
     name: "web_lookup",
     description:
-      "Delegate a web/documentation lookup to the Antigravity CLI (Gemini with web access): " +
-      "library docs, API references, error messages, current versions, external knowledge. " +
-      "USE THIS when you need information you don't have or that may be newer than your training data.",
+      "Delegate web/documentation research to Gemini (default: Gemini 4 Neon Medium): " +
+      "library docs, API references, error messages, current versions.",
     schema: {
       query: z.string().describe("What to look up on the web."),
       ...commonShape,
     },
-    chain: ["Gemini * Flash (Medium)", "Gemini * Flash (High)", ...NON_GEMINI_FALLBACK],
+    chain: NEON_MEDIUM_CHAIN,
     timeoutSec: 120,
     buildPrompt(args) {
       return `Look up on the web: ${args.query}\n\nInclude source URLs for key claims. ${OUTPUT_RULES}`;
@@ -105,22 +114,22 @@ export const TOOLS: ToolDef[] = [
   {
     name: "adversarial_review",
     description:
-      "Get an adversarial second opinion from a different model family (Gemini Pro). " +
-      "ALWAYS use this for plan critiques, design reviews, and pre-merge code review: " +
-      "it hunts for flaws, edge cases, security issues, and unstated assumptions you may have missed.",
+      "Get an independent second opinion & adversarial review from Gemini (default: Gemini 4 Neon High; " +
+      "pass model='gemini-4-neon-xhigh' only for rare high-stakes deep evaluations). " +
+      "USE THIS before major unapproved decisions, after workflow/prompt/proposal changes, or for pre-merge code review.",
     schema: {
       content: z
         .string()
         .optional()
-        .describe("Inline content to review (plan, diff, code snippet)."),
+        .describe("Inline content to review (plan, proposal, diff, decision dilemma)."),
       files: z
         .array(z.string())
         .optional()
         .describe("File paths to review instead of inline content."),
-      focus: z.string().optional().describe("Optional focus area, e.g. 'security', 'concurrency'."),
+      focus: z.string().optional().describe("Optional focus area, e.g. 'edge cases', 'tradeoffs'."),
       ...commonShape,
     },
-    chain: ["Gemini * Pro (High)", "Gemini * Flash (High)", ...NON_GEMINI_FALLBACK],
+    chain: NEON_HIGH_CHAIN,
     timeoutSec: 300,
     buildPrompt(args, cwd) {
       const files = args.files as string[] | undefined;
@@ -135,9 +144,9 @@ export const TOOLS: ToolDef[] = [
             .join("\n")}`;
       const focus = args.focus ? `\nFocus especially on: ${args.focus}.` : "";
       return (
-        `You are an adversarial reviewer. Find real flaws: bugs, edge cases, security issues, ` +
-        `performance traps, unstated assumptions, and simpler alternatives.${focus}\n\n${subject}\n\n` +
-        `Rank findings by severity (critical/major/minor) and justify each. ` +
+        `You are an independent collaborative reviewer. Find real flaws: bugs, edge cases, ` +
+        `unstated assumptions, missing dimensions, and concrete alternatives.${focus}\n\n${subject}\n\n` +
+        `Rank findings by severity (critical/major/minor) and justify each clearly. ` +
         `Do not pad with praise or restate the input. ${OUTPUT_RULES}`
       );
     },
@@ -145,12 +154,11 @@ export const TOOLS: ToolDef[] = [
   {
     name: "follow_up",
     description:
-      "Continue a previous Antigravity session by session_id (returned by every other tool). " +
-      "USE THIS for follow-up questions about a prior delegation — the full prior context " +
-      "is already on agy's side, so you don't resend anything.",
+      "Continue a previous Gemini temporary session by session_id (returned by every other tool). " +
+      "USE THIS for multi-turn discussion with Gemini on a review or investigation without resending context.",
     schema: {
       session_id: z.string().describe("The session id returned by a previous agy-bridge call."),
-      question: z.string().describe("The follow-up question."),
+      question: z.string().describe("The follow-up question or discussion point."),
       ...commonShape,
     },
     chain: [],
@@ -162,13 +170,14 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delegate",
     description:
-      "Raw delegation to the Antigravity CLI for heavy tasks that don't fit the other tools. " +
-      "agy has full tool access (shell, file reads, web) in the given cwd.",
+      "Delegate a focused collaborative research, report-drafting, or decision-discussion task to Gemini " +
+      "(default: Gemini 4 Neon High; pass model='gemini-4-neon-medium' for high-volume reading, " +
+      "or 'gemini-4-neon-xhigh' for rare deep evaluation). agy has full tool access in cwd.",
     schema: {
-      prompt: z.string().describe("The complete task prompt for agy."),
+      prompt: z.string().describe("The complete task prompt for Gemini."),
       ...commonShape,
     },
-    chain: ["Gemini * Flash (High)", ...NON_GEMINI_FALLBACK],
+    chain: NEON_HIGH_CHAIN,
     timeoutSec: 600,
     buildPrompt(args) {
       return args.prompt as string;

@@ -18,7 +18,11 @@ const cfg: Config = {
   onFailure: "fallback",
 };
 
-const LISTING = "Gemini 3.8 Flash (Medium)\nGemini 3.8 Flash (High)\nGemini 3.1 Pro (High)\n";
+const LISTING =
+  "gemini-4-neon-medium\tGemini 4 Neon (Medium)\n" +
+  "gemini-4-neon-high\tGemini 4 Neon (High)\n" +
+  "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n" +
+  "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n";
 
 const LOG_429 =
   "E0613 log.go:398] agent executor error: RESOURCE_EXHAUSTED (code 429): " +
@@ -78,14 +82,35 @@ function handlerFor(
 }
 
 describe("createToolHandler", () => {
-  it("runs delegate and appends model + session footer", async () => {
+  it("runs delegate with Neon High by default and appends model + session footer", async () => {
     const f = fakeDeps();
     const res = await handlerFor("delegate", f)({ prompt: "do x" });
     const text = (res.content[0] as { text: string }).text;
     expect(text).toContain("the answer");
-    expect(text).toContain("Gemini 3.8 Flash (High)");
+    expect(text).toContain("Gemini 4 Neon (High)");
     expect(text).toContain("sess-1");
     expect(f.runs[0].args).toContain("--model");
+    expect(res.structuredContent).toBeDefined();
+  });
+
+  it("routes analyze_files to Neon Medium by default", async () => {
+    const f = fakeDeps();
+    await handlerFor("analyze_files", f)({ files: ["a.log"], question: "summarize" });
+    expect(f.modelOf(f.runs[0])).toBe("Gemini 4 Neon (Medium)");
+  });
+
+  it("routes adversarial_review to Neon High by default and allows xhigh override", async () => {
+    const f = fakeDeps();
+    await handlerFor("adversarial_review", f)({ content: "plan" });
+    expect(f.modelOf(f.runs[0])).toBe("Gemini 4 Neon (High)");
+    await handlerFor(
+      "adversarial_review",
+      f,
+    )({
+      content: "deep plan",
+      model: "gemini-4-neon-xhigh",
+    });
+    expect(f.modelOf(f.runs[1])).toBe("Gemini 4 Neon (XHigh)");
   });
 
   it("follow_up passes --conversation and no --model", async () => {
@@ -132,37 +157,41 @@ describe("createToolHandler", () => {
   });
 
   it("fails over to the next chain model on quota exhaustion", async () => {
-    const f = fakeDeps(["Gemini 3.8 Flash (Medium)"]);
+    const f = fakeDeps(["Gemini 4 Neon (Medium)"]);
     const res = await handlerFor("web_lookup", f)({ query: "docs" });
     const text = (res.content[0] as { text: string }).text;
     expect(res.isError).toBeUndefined();
     expect(f.runs).toHaveLength(2);
-    expect(f.modelOf(f.runs[0])).toBe("Gemini 3.8 Flash (Medium)");
-    expect(f.modelOf(f.runs[1])).toBe("Gemini 3.8 Flash (High)");
+    expect(f.modelOf(f.runs[0])).toBe("Gemini 4 Neon (Medium)");
+    expect(f.modelOf(f.runs[1])).toBe("Gemini 4 Neon (High)");
     expect(text).toContain("the answer");
-    expect(text).toContain("model: Gemini 3.8 Flash (High)");
-    expect(text).toMatch(/failover.*Gemini 3.8 Flash \(Medium\).*quota/i);
+    expect(text).toContain("model: Gemini 4 Neon (High)");
+    expect(text).toMatch(/failover.*Gemini 4 Neon \(Medium\).*quota/i);
   });
 
   it("skips cooled-down models on subsequent calls without spawning them", async () => {
-    const f = fakeDeps(["Gemini 3.8 Flash (Medium)"]);
+    const f = fakeDeps(["Gemini 4 Neon (Medium)"]);
     const cooldowns = new CooldownRegistry();
     const handler = handlerFor("web_lookup", f, {}, cooldowns);
     await handler({ query: "first" });
     expect(f.runs).toHaveLength(2);
     await handler({ query: "second" });
     expect(f.runs).toHaveLength(3);
-    expect(f.modelOf(f.runs[2])).toBe("Gemini 3.8 Flash (High)");
+    expect(f.modelOf(f.runs[2])).toBe("Gemini 4 Neon (High)");
   });
 
   it("errors with reset times when every chain model is quota-exhausted", async () => {
-    const f = fakeDeps(["Gemini 3.8 Flash (Medium)", "Gemini 3.8 Flash (High)"]);
+    const f = fakeDeps([
+      "Gemini 4 Neon (Medium)",
+      "Gemini 4 Neon (High)",
+      "Gemini 3.8 Flash (High)",
+    ]);
     const res = await handlerFor("web_lookup", f)({ query: "docs" });
     expect(res.isError).toBe(true);
     const text = (res.content[0] as { text: string }).text;
     expect(text).toMatch(/quota/i);
-    expect(text).toContain("Gemini 3.8 Flash (Medium)");
-    expect(text).toContain("Gemini 3.8 Flash (High)");
+    expect(text).toContain("Gemini 4 Neon (Medium)");
+    expect(text).toContain("Gemini 4 Neon (High)");
     expect(text).toContain("4h24m");
   });
 
