@@ -1,11 +1,11 @@
 {
-  "name": "gemini-bridge",
+  "name": "gemini-as-claude-subagent",
   "version": "0.5.1",
-  "description": "MCP bridge and compact MCP App panel for Claude Code to delegate tasks to Gemini via Antigravity CLI with live token telemetry and quota tracking.",
-  "mcpName": "io.github.d-finite/gemini-bridge",
+  "description": "Use Gemini (via Antigravity CLI) as a Claude Code subagent over MCP, with Neon routing, live token telemetry, Antigravity quota tracking, and a compact MCP App panel.",
+  "mcpName": "io.github.d-finite/gemini-as-claude-subagent",
   "type": "module",
   "bin": {
-    "gemini-bridge": "dist/index.js"
+    "gemini-as-claude-subagent": "dist/index.js"
   },
   "files": [
     "dist",
