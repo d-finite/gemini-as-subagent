@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { createToolHandler, createWaitHandler } from "../src/server.js";
+import {
+  CancellingTaskStore,
+  createToolHandler,
+  createToolTaskHandler,
+  createWaitHandler,
+} from "../src/server.js";
+import type {
+  CreateTaskRequestHandlerExtra,
+  TaskRequestHandlerExtra,
+} from "@modelcontextprotocol/sdk/experimental/tasks";
 import { ModelRegistry } from "../src/models.js";
 import { TOOLS } from "../src/tools.js";
 import { CooldownRegistry } from "../src/quota.js";
@@ -290,5 +299,88 @@ describe("createToolHandler", () => {
     const doneText = (doneRes.content[0] as { text: string }).text;
     expect(doneText).toContain("deep research report");
     expect(doneText).toContain("sess-bg");
+  });
+
+  it("supports native MCP Task lifecycle and aborts child on tasks/cancel", async () => {
+    let finishChild!: () => void;
+    const kills: string[] = [];
+    const deps: RunnerDeps = {
+      spawnChild: () => ({
+        stdout: () => "native task report",
+        stderr: () => "",
+        wait: () =>
+          new Promise((resolve) => {
+            finishChild = () => resolve({ code: 0 });
+          }),
+        kill: (sig) => {
+          kills.push(sig);
+        },
+      }),
+      readLog: async () => "",
+      removeLog: async () => {},
+      readSessionsFile: async () => JSON.stringify({ [process.cwd()]: "sess-task" }),
+      makeLogPath: () => "/tmp/agy-bridge-task.log",
+      pollMs: 5,
+      graceMs: 20,
+      killGraceMs: 5,
+    };
+
+    const cooldowns = new CooldownRegistry();
+    const tracker = new RunTracker(undefined, "/nonexistent/quota.json", false);
+    const store = new CancellingTaskStore(tracker);
+    const taskHandler = createToolTaskHandler(
+      TOOLS.find((t) => t.name === "delegate")!,
+      cfg,
+      new ModelRegistry(async () => LISTING),
+      deps,
+      cooldowns,
+      tracker,
+      store,
+    );
+
+    const makeCreateExtra = (reqId: number) =>
+      ({
+        taskStore: {
+          createTask: (opts: Parameters<CancellingTaskStore["createTask"]>[0]) =>
+            store.createTask(opts, reqId, { method: "tools/call" }),
+          getTask: (id: string) => store.getTask(id),
+          storeTaskResult: (
+            id: string,
+            s: "completed" | "failed",
+            r: Parameters<CancellingTaskStore["storeTaskResult"]>[2],
+          ) => store.storeTaskResult(id, s, r),
+          getTaskResult: (id: string) => store.getTaskResult(id),
+          updateTaskStatus: (
+            id: string,
+            s: Parameters<CancellingTaskStore["updateTaskStatus"]>[1],
+            m?: string,
+          ) => store.updateTaskStatus(id, s, m),
+        },
+      }) as unknown as CreateTaskRequestHandlerExtra;
+
+    // 1. Completion flow
+    const created = await taskHandler.createTask({ prompt: "long survey" }, makeCreateExtra(1));
+    expect(created.task.status).toBe("working");
+    await new Promise((r) => setTimeout(r, 15));
+    finishChild();
+    await new Promise((r) => setTimeout(r, 30));
+
+    const doneTask = await taskHandler.getTask({}, {
+      taskId: created.task.taskId,
+      taskStore: store,
+    } as unknown as TaskRequestHandlerExtra);
+    expect(doneTask.status).toBe("completed");
+    const result = await taskHandler.getTaskResult({}, {
+      taskId: created.task.taskId,
+      taskStore: store,
+    } as unknown as TaskRequestHandlerExtra);
+    expect((result.content[0] as { text: string }).text).toContain("native task report");
+
+    // 2. Cancellation flow via tasks/cancel -> updateTaskStatus("cancelled")
+    const created2 = await taskHandler.createTask({ prompt: "cancel me" }, makeCreateExtra(2));
+    await new Promise((r) => setTimeout(r, 15));
+    await store.updateTaskStatus(created2.task.taskId, "cancelled", "user stopped");
+    expect(kills).toContain("SIGTERM");
+    store.cleanup();
   });
 });

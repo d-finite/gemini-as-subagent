@@ -92,7 +92,7 @@ Point any stdio MCP client to `node /path/to/gemini-as-subagent/dist/index.js` w
 | `gemini_wait`        | Wait for a `background: true` task and collect its full report  | —                                                         | up to `wait_sec` (def `120s`) |
 | `gemini_status`      | Open or refresh the compact MCP App status & quota panel        | —                                                         | —                             |
 
-Every delegation tool accepts optional `model`, `cwd`, `timeout_sec` (`0` = no time limit), and `background: true` (runs asynchronously with no time limit by default and returns `run_id` immediately — ideal for large research tasks that would otherwise hit synchronous MCP timeouts).
+Every delegation tool supports **native MCP Tasks** (`execution.taskSupport: "optional"`), plus optional `model`, `cwd`, and `timeout_sec` (`0` = no time limit). On **Claude Code 2.1+**, simply call tools normally (omit `background: true`): Claude Code natively adopts long runs into its Background Tasks panel with zero LLM polling and automatically wakes Claude via `<task-notification>` when Gemini finishes. (`background: true` + `gemini_wait` remain available for MCP hosts without native MCP Tasks.)
 
 Every delegation response includes a compact telemetry footer:
 

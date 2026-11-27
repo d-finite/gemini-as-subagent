@@ -37,9 +37,9 @@ const commonShape = {
     .boolean()
     .optional()
     .describe(
-      "Run asynchronously in the background with no time limit (default timeout_sec=0) and return " +
-        "a run_id immediately. RECOMMENDED for large research, broad trajectory sweeps, or heavy " +
-        "reviews (>3 min) so the MCP call never times out. Retrieve results with gemini_wait(run_id).",
+      "Manual polling background mode for MCP hosts that do NOT support native MCP Tasks. " +
+        "On Claude Code, OMIT this flag — Claude Code handles native MCP Tasks / auto-backgrounding " +
+        "and wakes you automatically via <task-notification> when Gemini finishes.",
     ),
 };
 

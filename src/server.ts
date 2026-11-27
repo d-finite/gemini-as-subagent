@@ -3,6 +3,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  InMemoryTaskStore,
+  type CreateTaskRequestHandlerExtra,
+  type TaskRequestHandlerExtra,
+  type ToolTaskHandler,
+} from "@modelcontextprotocol/sdk/experimental/tasks";
+import type { CallToolResult, Task } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { loadConfig, type Config } from "./config.js";
 import { ModelRegistry } from "./models.js";
@@ -26,6 +33,8 @@ import { TOOLS, type ToolDef } from "./tools.js";
 
 export const PANEL_URI = "ui://gemini/panel.html";
 export const MCP_APP_MIME = "text/html;profile=mcp-app";
+const TASK_TTL_MS = 60 * 60 * 1000;
+const TASK_POLL_INTERVAL_MS = 1000;
 
 const GEMINI_SPARKLE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" fill="none">' +
@@ -68,6 +77,42 @@ interface ToolResponse {
 
 interface HandlerExtra {
   signal?: AbortSignal;
+}
+
+/**
+ * Extends InMemoryTaskStore so MCP `tasks/cancel` also aborts the underlying
+ * `agy` child process tree tracked in RunTracker.
+ */
+export class CancellingTaskStore extends InMemoryTaskStore {
+  private taskToRun = new Map<string, string>();
+
+  constructor(private tracker: RunTracker) {
+    super();
+  }
+
+  bindRun(taskId: string, runId: string): void {
+    this.taskToRun.set(taskId, runId);
+  }
+
+  unbindRun(taskId: string): void {
+    this.taskToRun.delete(taskId);
+  }
+
+  override async updateTaskStatus(
+    taskId: string,
+    status: Task["status"],
+    statusMessage?: string,
+    sessionId?: string,
+  ): Promise<void> {
+    await super.updateTaskStatus(taskId, status, statusMessage, sessionId);
+    if (status === "cancelled") {
+      const runId = this.taskToRun.get(taskId);
+      if (runId) {
+        this.tracker.cancelRun(runId);
+        this.taskToRun.delete(taskId);
+      }
+    }
+  }
 }
 
 async function loadPanelHtml(): Promise<string> {
@@ -128,6 +173,7 @@ export function createToolHandler(
   deps: RunnerDeps = defaultDeps,
   cooldowns: CooldownRegistry = new CooldownRegistry(),
   tracker: RunTracker = new RunTracker(undefined, undefined, false),
+  opts: { defaultUnlimited?: boolean; onRunStarted?: (runId: string) => void } = {},
 ): (args: Record<string, unknown>, extra?: HandlerExtra) => Promise<ToolResponse> {
   return async (args, extra) => {
     let runId: string | undefined;
@@ -146,7 +192,7 @@ export function createToolHandler(
       const timeoutSec =
         explicitTimeout !== undefined
           ? explicitTimeout
-          : background
+          : background || opts.defaultUnlimited
             ? 0
             : (cfg.perToolTimeouts[tool.name] ??
               (cfg.timeoutExplicit ? cfg.timeoutSec : tool.timeoutSec));
@@ -168,6 +214,7 @@ export function createToolHandler(
         sessionId: conversationId,
       });
       runId = rec.id;
+      opts.onRunStarted?.(rec.id);
 
       const execute = async (
         signal?: AbortSignal,
@@ -243,11 +290,13 @@ export function createToolHandler(
             {
               type: "text",
               text:
-                `Started Gemini background task.\n` +
+                `Started Gemini background task (manual polling mode).\n` +
                 `- run_id: ${rec.id}\n` +
                 `- model: ${initialModel} (${limitLabel})\n` +
                 `- tool: ${tool.name}\n` +
-                `Call \`gemini_wait({ run_id: "${rec.id}" })\` to collect the completed report without hitting MCP tool timeouts.`,
+                `NOTE: Manual background=true does NOT auto-wake Claude Code. Call ` +
+                `\`gemini_wait({ run_id: "${rec.id}" })\` to collect the report, or omit ` +
+                `\`background\` next time so Claude Code handles backgrounding and <task-notification> wake-up natively.`,
             },
           ],
           structuredContent: {
@@ -283,6 +332,69 @@ export function createToolHandler(
       }
       return formatError(msg, cfg);
     }
+  };
+}
+
+/**
+ * MCP native Task handler (execution.taskSupport = "optional").
+ * - Task-capable hosts (Claude Code 2.1+) receive an immediate MCP Task, track it
+ *   in the native Background Tasks panel with zero LLM polling cost, and wake the
+ *   agent automatically via `<task-notification>` upon completion.
+ * - Non-task hosts transparently fall back via SDK automatic task polling.
+ */
+export function createToolTaskHandler(
+  tool: ToolDef,
+  cfg: Config,
+  registry: ModelRegistry,
+  deps: RunnerDeps = defaultDeps,
+  cooldowns: CooldownRegistry = new CooldownRegistry(),
+  tracker: RunTracker = new RunTracker(undefined, undefined, false),
+  taskStore?: CancellingTaskStore,
+): ToolTaskHandler<z.ZodRawShape> {
+  return {
+    createTask: async (args: Record<string, unknown>, extra: CreateTaskRequestHandlerExtra) => {
+      const task = await extra.taskStore.createTask({
+        ttl: TASK_TTL_MS,
+        pollInterval: TASK_POLL_INTERVAL_MS,
+      });
+      const controller = new AbortController();
+      const handler = createToolHandler(tool, cfg, registry, deps, cooldowns, tracker, {
+        defaultUnlimited: args.background !== true,
+        onRunStarted: (runId) => {
+          tracker.registerController(runId, controller);
+          taskStore?.bindRun(task.taskId, runId);
+        },
+      });
+
+      void handler(args, { signal: controller.signal })
+        .then(async (res) => {
+          taskStore?.unbindRun(task.taskId);
+          const current = await extra.taskStore.getTask(task.taskId);
+          if (!current || current.status === "cancelled") return;
+          await extra.taskStore.storeTaskResult(
+            task.taskId,
+            res.isError ? "failed" : "completed",
+            res as CallToolResult,
+          );
+        })
+        .catch(async (err) => {
+          taskStore?.unbindRun(task.taskId);
+          const current = await extra.taskStore.getTask(task.taskId);
+          if (!current || current.status === "cancelled") return;
+          const errRes = formatError((err as Error).message, cfg);
+          await extra.taskStore.storeTaskResult(task.taskId, "failed", errRes as CallToolResult);
+        });
+
+      return { task };
+    },
+    getTask: async (_args: Record<string, unknown>, extra: TaskRequestHandlerExtra) => {
+      const task = await extra.taskStore.getTask(extra.taskId);
+      if (!task) throw new Error(`Task ${extra.taskId} not found`);
+      return task;
+    },
+    getTaskResult: async (_args: Record<string, unknown>, extra: TaskRequestHandlerExtra) => {
+      return (await extra.taskStore.getTaskResult(extra.taskId)) as CallToolResult;
+    },
   };
 }
 
@@ -360,6 +472,7 @@ export function createServer(): McpServer {
   });
   const cooldowns = new CooldownRegistry();
   const tracker = new RunTracker();
+  const taskStore = new CancellingTaskStore(tracker);
 
   const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
   const serverInfo = {
@@ -368,7 +481,20 @@ export function createServer(): McpServer {
     version,
     icons: [{ src: GEMINI_ICON_DATA_URI, mimeType: "image/svg+xml", sizes: ["any"] }],
   } as ConstructorParameters<typeof McpServer>[0];
-  const server = new McpServer(serverInfo);
+  const server = new McpServer(serverInfo, {
+    taskStore,
+    capabilities: {
+      tasks: {
+        list: {},
+        cancel: {},
+        requests: {
+          tools: {
+            call: {},
+          },
+        },
+      },
+    },
+  });
 
   server.registerResource(
     "gemini_panel",
@@ -393,14 +519,15 @@ export function createServer(): McpServer {
   );
 
   for (const tool of TOOLS) {
-    server.registerTool(
+    server.experimental.tasks.registerToolTask(
       tool.name,
       {
         description: tool.description,
         inputSchema: tool.schema,
+        execution: { taskSupport: "optional" },
         _meta: PANEL_META,
       },
-      createToolHandler(tool, cfg, registry, defaultDeps, cooldowns, tracker),
+      createToolTaskHandler(tool, cfg, registry, defaultDeps, cooldowns, tracker, taskStore),
     );
   }
 
@@ -409,10 +536,12 @@ export function createServer(): McpServer {
     {
       title: "Wait for Gemini Background Run",
       description:
-        "Wait for a background Gemini task (started with background=true) to finish and return its full report. " +
-        "Waits up to wait_sec (default 120s) without hitting MCP timeouts; if still running, call again.",
+        "Wait for a manual background=true Gemini run (only needed on MCP hosts without native MCP Tasks; " +
+        "on Claude Code, omit background=true so the host auto-backgrounds and wakes you via <task-notification>).",
       inputSchema: {
-        run_id: z.string().describe("The run_id returned when starting the background task."),
+        run_id: z
+          .string()
+          .describe("The run_id returned when starting a manual background=true task."),
         wait_sec: z
           .number()
           .int()

@@ -92,7 +92,7 @@ claude mcp list
 | `gemini_wait`        | 等待 `background: true` 后台任务完成并收回完整报告 | —                                                         | 最多等 `wait_sec`（默认 `120s`） |
 | `gemini_status`      | 唤出或刷新紧凑型 MCP App 状态与额度面板            | —                                                         | —                                |
 
-所有委托工具均支持可选参数 `model`、`cwd`、`timeout_sec`（传 `0` 表示无时间上限，直到完成）以及 `background: true`（后台异步运行、默认无时间上限、秒返 `run_id`，彻底避免长调研撞上同步 MCP 超时墙）。
+所有委托工具均已原生支持 **MCP Tasks 协议**（`execution.taskSupport: "optional"`），并支持可选参数 `model`、`cwd`、`timeout_sec`（传 `0` 表示无时间上限）。在 **Claude Code 2.1+** 上直接正常调用即可（**无需传 `background: true`**）：Claude Code 宿主会自动把长任务接管进原生「后台任务」栏、零 Token 消耗后台轮询，并在 Gemini 完成后自动发送 `<task-notification>` 唤醒 Claude。（`background: true` + `gemini_wait` 保留给暂不支持原生 MCP Tasks 的其他 MCP 客户端。）
 
 每次调用返回末尾都会附带一行紧凑状态脚注：
 
